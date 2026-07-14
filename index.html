@@ -1260,12 +1260,16 @@ padding: 20px;
 backdrop-filter: blur(8px)
 }
 .shop-overlay.active { display: flex }
+/* Make purchase confirmation appear ON TOP of the store overlay */
+#game-overlay {
+z-index: 200;
+}
 .shop-container {
 background: var(--pop);
 border: 1px solid var(--brd);
 border-radius: 20px;
 padding: 24px;
-max-width: 500px;
+max-width: 600px;
 width: 100%;
 max-height: 85vh;
 overflow-y: auto
@@ -1303,7 +1307,8 @@ border-radius: 8px;
 color: var(--btnT);
 cursor: pointer;
 font-weight: 700;
-transition: all .2s
+transition: all .2s;
+font-size: .8rem;
 }
 .shop-tab.active {
 background: var(--acc);
@@ -2086,6 +2091,7 @@ padding: 2px;
   <div id="carrom-endScreen">
     <h1 id="carrom-endTitle">Game Over</h1>
     <div id="carrom-statsBox"></div>
+    <button class="btn" style="border-color:#00ff88;color:#00ff88; margin:6px;" id="carrom-reward-ad"><i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span></button>
     <button class="playBtn" id="carrom-restartBtn">Back to Menu</button>
   </div>
 </div>
@@ -2141,10 +2147,7 @@ padding: 2px;
 <h2>Store</h2>
 <div class="shop-coins"><i class="fas fa-coins"></i><span id="shop-coins-display">0</span></div>
 </div>
-<div class="shop-tabs">
-<div class="shop-tab active" onclick="Shop.switchTab('bird', this)">Bird Skins</div>
-<div class="shop-tab" onclick="Shop.switchTab('enemy', this)">Enemy Skins</div>
-</div>
+<div class="shop-tabs" id="shop-tabs"></div>
 <div class="shop-grid" id="shop-grid"></div>
 <div class="pop-btns" style="margin-top:20px">
 <button class="btn" onclick="Shop.close()"><i class="fas fa-times"></i><span>Close</span></button>
@@ -2152,7 +2155,98 @@ padding: 2px;
 </div>
 </div>
 <script>
-/* ============ AUDIO ============ */
+// ============ ANDROID AD BRIDGE ============ 
+let interstitialInFlight = false;
+let interstitialTimeoutId = null;
+let pendingReviveCallback = null;
+let pendingDoubleRewardCallback = null;
+let currentGameScoreForReward = 0;
+
+function showInterstitialAd() {
+    if (interstitialInFlight) {
+        console.log("Interstitial already in flight, skipping duplicate call");
+        return;
+    }
+    if (window.Android && Android.showInterstitialAd) {
+        interstitialInFlight = true;
+        console.log("Showing interstitial ad");
+        Android.showInterstitialAd();
+        interstitialTimeoutId = setTimeout(() => {
+            console.log("Interstitial timeout - resetting flag");
+            interstitialInFlight = false;
+        }, 8000);
+    } else {
+        console.log("Interstitial ad not available (no Android bridge)");
+    }
+}
+
+function showRewardAd(callback, type) {
+    if (window.Android && Android.showRewardAd) {
+        console.log("Showing reward ad for: " + type);
+        if (type === 'revive') {
+            pendingReviveCallback = callback;
+        } else if (type === 'double') {
+            pendingDoubleRewardCallback = callback;
+        }
+        Android.showRewardAd();
+    } else {
+        console.log("Reward ad not available");
+        UI.toast('Ads unavailable right now', 'w');
+        if (callback) callback(false);
+    }
+}
+
+function showBannerAd() {
+    if (window.Android && Android.showBannerAd) {
+        console.log("Showing banner ad");
+        Android.showBannerAd();
+    }
+}
+
+function hideBannerAd() {
+    if (window.Android && Android.hideBannerAd) {
+        console.log("Hiding banner ad");
+        Android.hideBannerAd();
+    }
+}
+
+function showAppOpenAd() {
+    if (window.Android && Android.showAppOpenAd) {
+        console.log("Showing app open ad");
+        Android.showAppOpenAd();
+    }
+}
+
+window.onInterstitialClosed = function () {
+    console.log("Interstitial ad closed");
+    interstitialInFlight = false;
+    if (interstitialTimeoutId) {
+        clearTimeout(interstitialTimeoutId);
+        interstitialTimeoutId = null;
+    }
+};
+
+window.onRewardEarned = function () {
+    console.log("Reward earned from ad");
+    if (pendingReviveCallback) {
+        pendingReviveCallback(true);
+        pendingReviveCallback = null;
+    }
+    if (pendingDoubleRewardCallback) {
+        pendingDoubleRewardCallback(true);
+        pendingDoubleRewardCallback = null;
+    }
+};
+
+window.onRewardAdCompleted = function () {
+    console.log("Reward ad completed");
+};
+
+setTimeout(function() {
+    showAppOpenAd();
+}, 1000);
+
+// ============ AUDIO ============ 
 const Audio = (() => {
 let ctx, enabled = true, musicEnabled = true, musicOsc = null, musicGain = null;
 function getCtx() {
@@ -2235,8 +2329,15 @@ levelStars: { easy: 0, normal: 0, hard: 0, expert: 0 },
 dailyBest: null, dailyDate: null,
 chessStats: { played: 0, won: 0, lost: 0, draws: 0, bestTime: null },
 coins: 0,
-ownedSkins: { bird: ['classic', 'eagle', 'falcon', 'owl', 'parrot', 'crow', 'kingfisher', 'peacock', 'penguin', 'flamingo'], enemy: ['classic'] },
-equippedSkins: { bird: 'classic', enemy: 'classic' },
+ownedSkins: { 
+    marble: ['classic'], bird: ['classic', 'eagle', 'falcon', 'owl', 'parrot', 'crow', 'kingfisher', 'peacock', 'penguin', 'flamingo'], 
+    enemy: ['classic'], ball: ['classic'], critter: ['classic'], castle: ['classic'], hero: ['classic'],
+    chess: ['classic'], disc: ['classic'], cardback: ['classic'], disk: ['classic'], symbol: ['classic'], striker: ['classic'] 
+},
+equippedSkins: { 
+    marble: 'classic', bird: 'classic', enemy: 'classic', ball: 'classic', critter: 'classic', castle: 'classic',
+    hero: 'classic', chess: 'classic', disc: 'classic', cardback: 'classic', disk: 'classic', symbol: 'classic', striker: 'classic' 
+},
 connectfour: { best: 0, played: 0, wins: 0 },
 memory: { best: 0, played: 0, wins: 0 },
 hanoi: { best: 0, played: 0, wins: 0 },
@@ -2248,8 +2349,15 @@ carrom: { played: 0, won: 0 },
 boardProgress: {}
 },
 init() {
-const d = this.defaults;
-for (let k in d) { if (this.get(k, null) === null) this.set(k, d[k]); }
+    const d = this.defaults;
+    for (let k in d) { 
+        if (this.get(k, null) === null) this.set(k, d[k]); 
+        else if (k === 'ownedSkins' || k === 'equippedSkins') {
+            const existing = this.get(k, {});
+            const merged = { ...d[k], ...existing };
+            this.set(k, merged);
+        }
+    }
 },
 reset() { for (let k in this.defaults) this.set(k, this.defaults[k]); }
 };
@@ -2349,6 +2457,11 @@ if (id === 'settings-screen') this.renderSettings();
 if (id === 'levels-screen') this.renderLevels();
 if (id === 'daily-screen') this.renderDaily();
 Audio.click();
+if (id === 'menu-screen' || id === 'levels-screen' || id === 'stats-screen' || id === 'achievements-screen' || id === 'settings-screen' || id === 'daily-screen' || id === 'modes-screen' || id === 'board-select-screen') {
+showBannerAd();
+} else {
+hideBannerAd();
+}
 },
 goBackFromSettings() {
 Audio.click();
@@ -2404,7 +2517,7 @@ el.innerHTML = h;
 renderBoard() {
 const boardEl = document.getElementById('board');
 boardEl.innerHTML = '';
-const skin = Store.get('skin', 'classic');
+const skin = Store.get('equippedSkins', Store.defaults.equippedSkins).marble || 'classic';
 const skinClass = 'm-' + skin;
 for (let r = 0; r < 7; r++) {
 for (let c = 0; c < 7; c++) {
@@ -2559,6 +2672,9 @@ pop.innerHTML = `
  ${bonus < 0 ? `<div style="font-size:.8rem;color:var(--err)">${bonus} penalties</div>` : ''}
 </div>
 <div class="pop-btns">
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="go-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="Game.restart();UI.closePopup()"><i class="fas fa-redo"></i><span>Try Again</span></button>
  ${levelNames.indexOf(GS.level) < levelNames.length - 1 ? `<button class="btn btn-p" onclick="(${nextLevel.toString()})()"><i class="fas fa-forward"></i><span>Next Level</span></button>` : ''}
 <button class="btn" onclick="UI.showScreen('levels-screen');UI.closePopup()"><i class="fas fa-th-large"></i><span>Levels</span></button>
@@ -2578,6 +2694,9 @@ pop.innerHTML = `
 <div style="font-size:.8rem;color:var(--t2);margin-top:6px">Try to leave fewer marbles next time</div>
 </div>
 <div class="pop-btns">
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="go-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="Game.restart();UI.closePopup()"><i class="fas fa-redo"></i><span>Try Again</span></button>
 <button class="btn" onclick="UI.showScreen('levels-screen');UI.closePopup()"><i class="fas fa-th-large"></i><span>Levels</span></button>
 <button class="btn" onclick="Game.quit();UI.closePopup()"><i class="fas fa-home"></i><span>Menu</span></button>
@@ -2586,6 +2705,20 @@ Audio.defeat();
 document.getElementById('board-frame').classList.add('board-shake');
 setTimeout(() => document.getElementById('board-frame').classList.remove('board-shake'), 500);
 }
+const adBtn = document.getElementById('go-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
 document.getElementById('go-ov').classList.add('active');
 },
 closePopup() { document.getElementById('go-ov').classList.remove('active'); },
@@ -2898,6 +3031,7 @@ if (Store.get('colorblind', false)) document.body.classList.add('colorblind');
 if (Store.get('largeText', false)) document.body.classList.add('large-text');
 if (Store.get('highContrast', false)) document.body.classList.add('high-contrast');
 initBgCanvas();
+setTimeout(function() { showBannerAd(); }, 500);
 window.addEventListener('resize', () => {
 const c = document.getElementById('bg-canvas');
 c.width = window.innerWidth; c.height = window.innerHeight;
@@ -3034,6 +3168,7 @@ document.querySelectorAll('.cell.vdest').forEach(m => m.classList.remove('vdest'
 }
 }, 3000);
 },
+restartCount: 0,
 restart() {
 if (GS.timerInterval) clearInterval(GS.timerInterval);
 GS.restarts++;
@@ -3048,6 +3183,8 @@ UI.updateGameUI();
 UI.showScreen('game-screen');
 this.startTimer();
 Audio.startMusic();
+this.restartCount++;
+if (this.restartCount % 3 === 0) showInterstitialAd();
 },
 pause() {
 if (!GS.playing || GS.paused) return;
@@ -3217,6 +3354,7 @@ if (this.state.raf) cancelAnimationFrame(this.state.raf);
 const pop = document.getElementById('mg-go-pop');
 const isNewBest = this.state.score > this.state.best;
 if (isNewBest) { this.state.best = this.state.score; Store.set(this.bestKey, this.state.best); }
+const canRevive = !this.state.reviveUsed && typeof this.doRevive === 'function';
 pop.innerHTML = `
 <div class="pop-t" style="color:var(--err)">Game Over</div>
 <div class="pop-p">
@@ -3224,11 +3362,45 @@ pop.innerHTML = `
  ${isNewBest ? '<div style="color:var(--acc); margin-top:8px;"><i class="fas fa-trophy"></i> New High Score!</div>' : `<div style="color:var(--t2); margin-top:8px;">Best: ${this.state.best}</div>`}
 </div>
 <div class="pop-btns">
+ ${canRevive ? `<button class="btn" style="border-color:#ff5252;color:#ff5252" id="mg-revive-ad"><i class="fas fa-heart"></i><span>Watch Ad: Continue</span></button>` : ''}
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="mg-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="ActiveMiniGame.restart()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="ActiveMiniGame.quit()"><i class="fas fa-home"></i><span>Home</span></button>
 </div>`;
+const reviveBtn = document.getElementById('mg-revive-ad');
+if (reviveBtn) {
+  reviveBtn.onclick = () => {
+    showRewardAd((success) => {
+      if (success) {
+        this.state.reviveUsed = true;
+        document.getElementById('mg-go-ov').classList.remove('active');
+        this.state.running = true;
+        this.state.paused = false;
+        this.doRevive();
+        UI.toast('Revived! Keep going!', 's');
+        this.loop(0);
+      }
+    }, 'revive');
+  };
+}
+const adBtn = document.getElementById('mg-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
 document.getElementById('mg-go-ov').classList.add('active');
 Audio.defeat();
+setTimeout(function() { showInterstitialAd(); }, 2000);
 },
 updateHUD() {
 document.getElementById('mg-score').textContent = this.state.score;
@@ -3247,6 +3419,7 @@ this.init('mg-canvas');
 if (this.state.raf) cancelAnimationFrame(this.state.raf);
 this.state.score = 0;
 this.state.best = Store.get(this.bestKey, 0);
+this.state.reviveUsed = false;
 this.skin = Store.get('equippedSkins', Store.defaults.equippedSkins).bird || 'classic';
 this.bird = { x: this.canvas.width / 4, y: this.canvas.height / 2, vy: 0, r: 15, shield: 0, slowmo: 0 };
 this.pipes = []; this.coins = []; this.powerups = []; this.particles = [];
@@ -3364,6 +3537,12 @@ explode(x, y, color = '#f44336') {
 for (let i = 0; i < 15; i++) {
 this.particles.push({ x, y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 1, color });
 }
+},
+doRevive() {
+this.bird.y = this.canvas.height / 2;
+this.bird.vy = 0;
+this.bird.shield = 120;
+this.pipes = this.pipes.filter(p => p.x < this.bird.x - 150 || p.x > this.bird.x + 250);
 },
 draw() {
 const c = this.ctx;
@@ -3493,6 +3672,7 @@ this.init('mg-canvas');
 if (this.state.raf) cancelAnimationFrame(this.state.raf);
 this.state.score = 0;
 this.state.best = Store.get(this.bestKey, 0);
+this.state.reviveUsed = false;
 this.player = { x: this.canvas.width / 2, y: this.canvas.height / 2, r: 15, hp: 100, maxHp: 100, speed: 4, fireRate: 15, fireTimer: 0, dmg: 15, angle: 0, animFrame: 0 };
 this.enemies = []; this.bullets = []; this.particles = [];
 this.bloodSplatters = []; this.footprints = [];
@@ -3596,7 +3776,7 @@ const side = Math.floor(Math.random() * 4);
 let x, y;
 if (side === 0) { x = 0; y = Math.random() * this.canvas.height; }
 else if (side === 1) { x = this.canvas.width; y = Math.random() * this.canvas.height; }
-else if (side === 2) { x = Math.random() * this.canvas.width; y = 0; }
+else if (side === 2) { x: Math.random() * this.canvas.width; y = 0; }
 else { x = Math.random() * this.canvas.width; y = this.canvas.height; }
 let type = 'normal'; const roll = Math.random();
 if (this.wave >= 3 && roll < 0.2) type = 'fast';
@@ -3719,6 +3899,10 @@ c.globalAlpha = 1;
 FloatingText.draw(c);
 },
 upgrades() { UI.toast('Survive the zombie apocalypse!', 'w'); },
+doRevive() {
+this.player.hp = this.player.maxHp * 0.5;
+this.enemies = this.enemies.filter(e => Math.hypot(e.x - this.player.x, e.y - this.player.y) > 200);
+},
 quit() {
 if (this._keyDown) { document.removeEventListener('keydown', this._keyDown); document.removeEventListener('keyup', this._keyUp); }
 const zone = document.getElementById('joystick-zone');
@@ -3732,241 +3916,338 @@ Object.getPrototypeOf(this).quit.call(this);
 }
 });
 // ============================================================
-// COLOR SWITCH
+// COLOR SWITCH (RACE VS AI)
 // ============================================================
 const ColorSwitch = Object.assign(Object.create(MiniGameBase), {
-bestKey: 'cs_best',
-ball: null, rings: [], particles: [], gravity: 0, jumpVel: 0, gameState: 'ready',
-obstacleGap: 220, centerX: 0, groundY: 0,
-COLORS: ['#ff4757', '#2ed573', '#3742fa', '#ffd32a'],
-_inputHandler: null, _keyHandler: null,
-start() {
-this.init('mg-canvas');
-if (this.state.raf) cancelAnimationFrame(this.state.raf);
-this.state.score = 0;
-this.state.best = Store.get(this.bestKey, 0);
-this.initGame();
+    bestKey: 'cs_best',
+    ball: null, rings: [], particles: [], gravity: 0, jumpVel: 0, gameState: 'ready',
+    obstacleGap: 400, centerX: 0, groundY: 0,
+    COLORS: ['#ff4757', '#2ed573', '#3742fa', '#ffd32a'],
+    aiScore: 0, aiScoreTimer: 0, targetScore: 15, matchEnded: false,
+    _inputHandler: null, _keyHandler: null,
+    start() {
+        this.init('mg-canvas');
+        if (this.state.raf) cancelAnimationFrame(this.state.raf);
+        this.state.score = 0;
+        this.state.best = Store.get(this.bestKey, 0);
+        this.state.reviveUsed = false;
+        this.matchEnded = false;
+        this.initGame();
 
-if (this._inputHandler) {
-window.removeEventListener('touchstart', this._inputHandler);
-window.removeEventListener('mousedown', this._inputHandler);
-}
-if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+        if (this._inputHandler) {
+            window.removeEventListener('touchstart', this._inputHandler);
+            window.removeEventListener('mousedown', this._inputHandler);
+        }
+        if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
 
-this._inputHandler = (e) => {
-if (!this.state.running || this.state.paused) return;
-if (e.target && e.target.closest && (e.target.closest('.mg-btn') || e.target.closest('.btn'))) return;
-if (e.cancelable) e.preventDefault();
-if (this.gameState === 'dead') return;
-this.jump();
-};
-this._keyHandler = (e) => {
-if (e.code === 'Space') {
-this._inputHandler(e);
-}
-};
+        this._inputHandler = (e) => {
+            if (!this.state.running || this.state.paused || this.matchEnded) return;
+            if (e.target && e.target.closest && (e.target.closest('.mg-btn') || e.target.closest('.btn'))) return;
+            if (e.cancelable) e.preventDefault();
+            if (this.gameState === 'dead') return;
+            this.jump();
+        };
+        this._keyHandler = (e) => {
+            if (e.code === 'Space') {
+                this._inputHandler(e);
+            }
+        };
 
-window.addEventListener('touchstart', this._inputHandler, { passive: false });
-window.addEventListener('mousedown', this._inputHandler);
-document.addEventListener('keydown', this._keyHandler);
+        window.addEventListener('touchstart', this._inputHandler, { passive: false });
+        window.addEventListener('mousedown', this._inputHandler);
+        document.addEventListener('keydown', this._keyHandler);
 
-Object.getPrototypeOf(this).start.call(this);
-this.loop(0);
-},
-initGame() {
-this.centerX = this.canvas.width / 2;
-this.groundY = this.canvas.height - 60;
-this.ball = { x: this.centerX, y: this.groundY - 40, r: 14, vy: 0, colorIndex: 0 };
-this.gravity = 0.5;
-this.jumpVel = -13;
-this.particles = [];
-this.gameState = 'ready';
-this.obstacleGap = 220; // Proper distance between rings
-this.rings = [];
-let startY = this.groundY - 180;
-for (let i = 0; i < 6; i++) {
-this.rings.push(this.makeRing(startY - i * this.obstacleGap));
-}
-this.updateHUD();
-},
-makeRing(y) {
-const radius = 110; // Larger circle
-const speed = (Math.random() < 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.015);
-return {
-y: y, radius: radius, angle: Math.random() * Math.PI * 2,
-speed: speed, passed: false, hasCenterCore: true
-};
-},
-resetRingAbove(ring) {
-let topY = Math.min(...this.rings.map(r => r.y));
-ring.y = topY - this.obstacleGap;
-ring.angle = Math.random() * Math.PI * 2;
-ring.speed = (Math.random() < 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.015);
-ring.passed = false;
-},
-jump() {
-if (this.gameState === 'ready') this.gameState = 'playing';
-if (this.gameState === 'playing') this.ball.vy = this.jumpVel;
-},
-spawnParticles(x, y, color) {
-for (let i = 0; i < 18; i++) {
-const angle = Math.random() * Math.PI * 2;
-const speed = 2 + Math.random() * 4;
-this.particles.push({
-x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-life: 40, color
-});
-}
-},
-die() {
-if (this.gameState !== 'playing') return;
-this.gameState = 'dead';
-this.spawnParticles(this.ball.x, this.ball.y, this.COLORS[this.ball.colorIndex]);
-setTimeout(() => { this.gameOver(); }, 500);
-},
-loop() {
-if (!this.state.running) return;
-if (!this.state.paused) { this.update(); this.render(); }
-this.state.raf = requestAnimationFrame(() => this.loop());
-},
-update() {
-if (this.gameState === 'playing') {
-this.ball.vy += this.gravity;
-this.ball.y += this.ball.vy;
+        Object.getPrototypeOf(this).start.call(this);
+        this.loop(0);
+    },
+    initGame() {
+        this.centerX = this.canvas.width / 2;
+        this.groundY = this.canvas.height - 60;
+        this.ball = { x: this.centerX, y: this.groundY - 40, r: 12, vy: 0, colorIndex: 0 };
+        this.gravity = 0.45;
+        this.jumpVel = -9.5;
+        this.particles = [];
+        this.gameState = 'ready';
+        this.obstacleGap = 400;
+        this.aiScore = 0;
+        this.aiScoreTimer = 0;
+        this.targetScore = 15;
+        this.matchEnded = false;
 
-const cameraLimit = this.groundY - 160;
-if (this.ball.y < cameraLimit) {
-const diff = cameraLimit - this.ball.y;
-this.ball.y = cameraLimit;
-this.rings.forEach(r => r.y += diff);
-this.groundY += diff;
-}
+        this.rings = [];
+        let startY = this.groundY - 220;
+        for (let i = 0; i < 6; i++) {
+            this.rings.push(this.makeRing(startY - i * this.obstacleGap));
+        }
 
-if (this.ball.y + this.ball.r > this.groundY) {
-this.ball.y = this.groundY - this.ball.r;
-this.die();
-}
+        const firstRing = this.rings[0];
+        let entryAngle = Math.PI / 2 - firstRing.angle;
+        entryAngle = ((entryAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        this.ball.colorIndex = Math.floor(entryAngle / (Math.PI / 2)) % 4;
 
-this.rings.forEach(ring => {
-ring.angle += ring.speed;
-const dx = this.ball.x - this.centerX;
-const dy = this.ball.y - ring.y;
-const dist = Math.sqrt(dx * dx + dy * dy);
+        this.updateHUD();
+    },
+    makeRing(y) {
+        const radius = 140;
+        const speed = (Math.random() < 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.015);
+        return {
+            y: y, radius: radius, angle: Math.random() * Math.PI * 2,
+            speed: speed, passed: false, hasCenterCore: true
+        };
+    },
+    resetRingAbove(ring) {
+        let topY = Math.min(...this.rings.map(r => r.y));
+        ring.y = topY - this.obstacleGap;
+        ring.angle = Math.random() * Math.PI * 2;
+        ring.speed = (Math.random() < 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.015);
+        ring.passed = false;
+    },
+    jump() {
+        if (this.gameState === 'ready') this.gameState = 'playing';
+        if (this.gameState === 'playing') this.ball.vy = this.jumpVel;
+    },
+    spawnParticles(x, y, color) {
+        for (let i = 0; i < 18; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 2 + Math.random() * 4;
+            this.particles.push({
+                x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                life: 40, color
+            });
+        }
+    },
+    die() {
+        if (this.gameState !== 'playing') return;
+        this.gameState = 'dead';
+        this.spawnParticles(this.ball.x, this.ball.y, this.COLORS[this.ball.colorIndex]);
+        if (!this.matchEnded) {
+            this.endMatch(false);
+        }
+    },
+   endMatch(playerWon) {
+    if (this.matchEnded) return;
+    this.matchEnded = true;
+    this.gameState = 'dead';
+    this.state.running = false;
+    if (this.state.raf) cancelAnimationFrame(this.state.raf);
 
-const outerR = ring.radius + 14;
-const innerR = ring.radius - 14;
+    const title = playerWon ? "You Won!" : "You Lost!";
+    const msg = playerWon 
+        ? `Congratulations! You beat the AI ${this.state.score} to ${this.aiScore}.` 
+        : `The AI won! AI score: ${this.aiScore}, Your score: ${this.state.score}.`;
 
-if (dist < outerR && dist > innerR) {
-let ballAngle = Math.atan2(dy, dx);
-if (ballAngle < 0) ballAngle += Math.PI * 2;
-let relAngle = ballAngle - ring.angle;
-relAngle = ((relAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-const segment = Math.floor(relAngle / (Math.PI / 2)) % 4;
-if (segment !== this.ball.colorIndex) {
-this.die();
-}
-}
+    UI.showGameOverlay(title, msg, `
+        <button class="btn" style="border-color:#00ff88;color:#00ff88" id="cs-reward-ad">
+          <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+        </button>
+        <button class="btn btn-p" onclick="UI.closeGameOverlay(); ColorSwitch.start();"><i class="fas fa-redo"></i><span>Play Again</span></button>
+        <button class="btn" onclick="UI.closeGameOverlay(); UI.showScreen('menu-screen');"><i class="fas fa-home"></i><span>Main Menu</span></button>
+    `);
 
-if (!ring.passed && dist < innerR) {
-ring.passed = true;
-this.state.score++;
-this.updateHUD();
-this.ball.colorIndex = Math.floor(Math.random() * 4);
-}
+    const adBtn = document.getElementById('cs-reward-ad');
+    if (adBtn) {
+        adBtn.onclick = () => {
+            showRewardAd(function(success) {
+                if (success) {
+                    const coins = Store.get('coins', 0);
+                    Store.set('coins', coins + 25);
+                    UI.toast('Reward: +25 coins!', 's');
+                    adBtn.remove();
+                }
+            }, 'double');
+        };
+    }
 
-if (ring.y > this.ball.y + 500) {
-this.resetRingAbove(ring);
-}
-});
-}
-
-this.particles.forEach(p => {
-p.x += p.vx;
-p.y += p.vy;
-p.vy += 0.15;
-p.life--;
-});
-this.particles = this.particles.filter(p => p.life > 0);
+    if (playerWon) {
+        Audio.victory();
+        Fireworks.launch();
+        Confetti.rain();
+    } else {
+        Audio.defeat();
+    }
+    
+    setTimeout(function() { showInterstitialAd(); }, 2000);
 },
-drawBall() {
-const ctx = this.ctx;
-ctx.beginPath();
-ctx.arc(this.ball.x, this.ball.y, this.ball.r, 0, Math.PI * 2);
-ctx.fillStyle = this.COLORS[this.ball.colorIndex];
-ctx.shadowColor = this.COLORS[this.ball.colorIndex];
-ctx.shadowBlur = 15;
-ctx.fill();
-ctx.shadowBlur = 0;
-},
-drawRing(ring) {
-const ctx = this.ctx;
-const segAngle = Math.PI / 2;
-for (let i = 0; i < 4; i++) {
-ctx.beginPath();
-ctx.arc(this.centerX, ring.y, ring.radius, ring.angle + i * segAngle, ring.angle + (i + 1) * segAngle);
-ctx.strokeStyle = this.COLORS[i];
-ctx.lineWidth = 14;
-ctx.lineCap = 'butt';
-ctx.stroke();
-}
-ctx.beginPath();
-ctx.arc(this.centerX, ring.y, 4, 0, Math.PI * 2);
-ctx.fillStyle = 'rgba(255,255,255,0.5)';
-ctx.fill();
-},
-drawGround() {
-const ctx = this.ctx;
-ctx.fillStyle = '#0f0f23';
-ctx.fillRect(0, this.groundY, this.canvas.width, this.canvas.height - this.groundY);
-ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-ctx.beginPath();
-ctx.moveTo(0, this.groundY);
-ctx.lineTo(this.canvas.width, this.groundY);
-ctx.stroke();
-},
-drawParticles() {
-const ctx = this.ctx;
-this.particles.forEach(p => {
-ctx.globalAlpha = Math.max(p.life / 40, 0);
-ctx.beginPath();
-ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-ctx.fillStyle = p.color;
-ctx.fill();
-ctx.globalAlpha = 1;
-});
-},
-render() {
-const ctx = this.ctx;
-const grad = ctx.createLinearGradient(0, 0, 0, this.canvas.height);
-grad.addColorStop(0, '#2b2b52');
-grad.addColorStop(1, '#1a1a2e');
-ctx.fillStyle = grad;
-ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    loop() {
+        if (!this.state.running) return;
+        if (!this.state.paused) { this.update(); this.render(); }
+        this.state.raf = requestAnimationFrame(() => this.loop());
+    },
+    update() {
+        if (this.gameState === 'playing') {
+            this.ball.vy += this.gravity;
+            this.ball.y += this.ball.vy;
 
-this.drawGround();
-this.rings.forEach(r => this.drawRing(r));
-if (this.gameState !== 'dead') this.drawBall();
-this.drawParticles();
+            this.aiScoreTimer++;
+            if (this.aiScoreTimer > 100) {
+                this.aiScoreTimer = 0;
+                this.aiScore++;
+                this.updateHUD();
+                if (this.aiScore >= this.targetScore) {
+                    this.endMatch(false);
+                    return;
+                }
+            }
 
-if (this.gameState === 'ready') {
-ctx.fillStyle = '#fff';
-ctx.globalAlpha = 0.7;
-ctx.font = 'bold 32px Nunito, sans-serif';
-ctx.textAlign = 'center';
-ctx.fillText('Color Switch', this.canvas.width / 2, this.canvas.height / 2 - 40);
-ctx.font = '18px Nunito, sans-serif';
-ctx.fillText('Tap, click, or press Space to jump', this.canvas.width / 2, this.canvas.height / 2);
-ctx.globalAlpha = 1;
-}
-},
-quit() {
-if (this._inputHandler) {
-window.removeEventListener('touchstart', this._inputHandler);
-window.removeEventListener('mousedown', this._inputHandler);
-}
-if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
-Object.getPrototypeOf(this).quit.call(this);
-}
+            const cameraShift = Math.max(0, (this.groundY - 180) - this.ball.y);
+            if (cameraShift > 0) {
+                this.ball.y += cameraShift;
+                this.rings.forEach(r => r.y += cameraShift);
+            }
+
+            if (this.ball.y + this.ball.r > this.groundY) {
+                this.ball.y = this.groundY - this.ball.r;
+                this.die();
+                return;
+            }
+
+            for (let i = 0; i < this.rings.length; i++) {
+                const ring = this.rings[i];
+                ring.angle += ring.speed;
+
+                const dx = this.ball.x - this.centerX;
+                const dy = this.ball.y - ring.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                const outerR = ring.radius + 14;
+                const innerR = ring.radius - 14;
+
+                if (dist < outerR && dist > innerR) {
+                    let ballAngle = Math.atan2(dy, dx);
+                    if (ballAngle < 0) ballAngle += Math.PI * 2;
+                    let relAngle = ballAngle - ring.angle;
+                    relAngle = ((relAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+                    const segment = Math.floor(relAngle / (Math.PI / 2)) % 4;
+                    if (segment !== this.ball.colorIndex) {
+                        this.die();
+                        return;
+                    }
+                }
+
+                if (!ring.passed && dist < innerR) {
+                    ring.passed = true;
+                    this.state.score++;
+                    this.updateHUD();
+                    this.ball.colorIndex = Math.floor(Math.random() * 4);
+                    
+                    if (this.state.score >= this.targetScore) {
+                        this.endMatch(true);
+                        return;
+                    }
+                }
+
+                if (ring.y > this.ball.y + 500) {
+                    this.resetRingAbove(ring);
+                }
+            }
+        }
+
+        this.particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.15;
+            p.life--;
+        });
+        this.particles = this.particles.filter(p => p.life > 0);
+    },
+    drawBall() {
+        const ctx = this.ctx;
+        const ballSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).ball || 'classic';
+        const skinData = Shop.skins.ball.find(s => s.id === ballSkin);
+        if (skinData && ballSkin !== 'classic') {
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = this.COLORS[this.ball.colorIndex];
+            ctx.shadowBlur = 15;
+            ctx.fillText(skinData.icon, this.ball.x, this.ball.y);
+            ctx.shadowBlur = 0;
+        } else {
+            ctx.beginPath();
+            ctx.arc(this.ball.x, this.ball.y, this.ball.r, 0, Math.PI * 2);
+            ctx.fillStyle = this.COLORS[this.ball.colorIndex];
+            ctx.shadowColor = this.COLORS[this.ball.colorIndex];
+            ctx.shadowBlur = 15;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    },
+    drawRing(ring) {
+        const ctx = this.ctx;
+        const segAngle = Math.PI / 2;
+        for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.arc(this.centerX, ring.y, ring.radius, ring.angle + i * segAngle, ring.angle + (i + 1) * segAngle);
+            ctx.strokeStyle = this.COLORS[i];
+            ctx.lineWidth = 14;
+            ctx.lineCap = 'butt';
+            ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(this.centerX, ring.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fill();
+    },
+    drawGround() {
+        const ctx = this.ctx;
+        ctx.fillStyle = '#0f0f23';
+        ctx.fillRect(0, this.groundY, this.canvas.width, this.canvas.height - this.groundY);
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.moveTo(0, this.groundY);
+        ctx.lineTo(this.canvas.width, this.groundY);
+        ctx.stroke();
+    },
+    drawParticles() {
+        const ctx = this.ctx;
+        this.particles.forEach(p => {
+            ctx.globalAlpha = Math.max(p.life / 40, 0);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        });
+    },
+    render() {
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        const grad = ctx.createLinearGradient(0, 0, 0, this.canvas.height);
+        grad.addColorStop(0, '#2b2b52');
+        grad.addColorStop(1, '#1a1a2e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        this.drawGround();
+        this.rings.forEach(r => this.drawRing(r));
+        if (this.gameState !== 'dead') this.drawBall();
+        this.drawParticles();
+
+        if (this.gameState === 'ready') {
+            ctx.fillStyle = '#fff';
+            ctx.globalAlpha = 0.7;
+            ctx.font = 'bold 32px Nunito, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Color Switch vs AI', this.canvas.width / 2, this.canvas.height / 2 - 40);
+            ctx.font = '18px Nunito, sans-serif';
+            ctx.fillText('Tap, click, or press Space to jump', this.canvas.width / 2, this.canvas.height / 2);
+            ctx.fillText(`First to ${this.targetScore} wins!`, this.canvas.width / 2, this.canvas.height / 2 + 30);
+            ctx.globalAlpha = 1;
+        }
+    },
+    updateHUD() {
+        document.getElementById('mg-score').textContent = `${this.state.score} / ${this.targetScore}`;
+        document.getElementById('mg-best').textContent = `AI: ${this.aiScore} / ${this.targetScore}`;
+    },
+    quit() {
+        if (this._inputHandler) {
+            window.removeEventListener('touchstart', this._inputHandler);
+            window.removeEventListener('mousedown', this._inputHandler);
+        }
+        if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+        Object.getPrototypeOf(this).quit.call(this);
+    }
 });
 // ============================================================
 // CARROM BOARD
@@ -4037,6 +4318,20 @@ const Carrom = (() => {
             setupBoard(starter);
         });
         document.getElementById('carrom-quitBtn').addEventListener('click', quit);
+
+        const carromAdBtn = document.getElementById('carrom-reward-ad');
+        if (carromAdBtn) {
+            carromAdBtn.onclick = () => {
+                showRewardAd(function(success) {
+                    if (success) {
+                        const coins = Store.get('coins', 0);
+                        Store.set('coins', coins + 25);
+                        UI.toast('Reward: +25 coins!', 's');
+                        carromAdBtn.remove();
+                    }
+                }, 'double');
+            };
+        }
 
         initialized = true;
         lastTime = performance.now();
@@ -4350,6 +4645,7 @@ const Carrom = (() => {
     function finishGame(winner) {
         state = 'gameover';
         updateHUD();
+        setTimeout(function() { showInterstitialAd(); }, 2000);
         if (mode === 'tournament') {
             tourneyGames++;
             tourneyWins[winner]++;
@@ -4439,9 +4735,11 @@ const Carrom = (() => {
 
     function drawStriker() {
         if (striker.pocketed) return;
+        const strikerSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).striker || 'classic';
+        const skinData = Shop.skins.striker.find(s => s.id === strikerSkin);
         ctx.beginPath();
         ctx.arc(striker.x, striker.y, striker.r, 0, Math.PI*2);
-        ctx.fillStyle = 'rgba(60,110,220,0.85)';
+        ctx.fillStyle = skinData ? skinData.color : 'rgba(60,110,220,0.85)';
         ctx.fill();
         ctx.strokeStyle = '#1c3a80'; ctx.lineWidth = 2; ctx.stroke();
     }
@@ -4455,7 +4753,7 @@ const Carrom = (() => {
         const len = Math.min(d, maxDragPx) * 1.6 + 30;
         ctx.setLineDash([8,6]);
         ctx.strokeStyle = 'rgba(255,211,42,0.85)';
-        ctx.lineWidth = 3;
+        ctx.lineWidth =3;
         ctx.beginPath();
         ctx.moveTo(striker.x, striker.y);
         ctx.lineTo(striker.x + nx*len, striker.y + ny*len);
@@ -4616,10 +4914,9 @@ if (this.timeLeft <= 0) this.endGame();
 },
 pickType() {
 const totalWeight = this.TYPES.reduce((s,t)=>s+t.weight,0);
-let r = Math.random() * totalWeight;
-for (const t of this.TYPES) {
-if (r < t.weight) return t;
-r -= t.weight;
+let r = Math.random() * totalWeight;for (const t of this.TYPES) {
+    if (r < t.weight) return t;
+    r -= t.weight;
 }
 return this.TYPES[0];
 },
@@ -4648,7 +4945,15 @@ const h = this.holes[idx];
 h.occupied = true;
 h.type = type;
 h.whackable = true;
-h.critterEl.textContent = type.emoji;
+
+let emoji = type.emoji;
+if (type.key === 'normal') {
+    const critterSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).critter || 'classic';
+    const skinData = Shop.skins.critter.find(s => s.id === critterSkin);
+    if (skinData) emoji = skinData.icon;
+}
+h.critterEl.textContent = emoji;
+
 h.el.classList.remove('whacked');
 h.el.classList.add('up');
 
@@ -4817,9 +5122,26 @@ UI.showGameOverlay("Time's Up!", `
 <div>Reached Level: ${this.level}</div>
  ${isNewBest ? '<div style="color:var(--acc); margin-top:8px;"><i class="fas fa-trophy"></i> New High Score!</div>' : `<div style="color:var(--t2); margin-top:8px;">Best: ${stats.best}</div>`}
 `, `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="wam-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="WhackAMole.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="WhackAMole.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
+const adBtn = document.getElementById('wam-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
 },
 updateUI() {
 const scoreEl = document.getElementById('wam-score');
@@ -5115,6 +5437,7 @@ if (this.gameOver) return;
     },
     renderBoard() {
         const boardEl = document.getElementById('chess-board'); boardEl.innerHTML = '';
+        const pieceSet = Shop.getChessPieceSet();
         for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
             const square = document.createElement('div');
             square.className = 'chess-square ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
@@ -5132,12 +5455,12 @@ if (this.gameOver) return;
             if (piece) {
                 const pieceEl = document.createElement('span');
                 pieceEl.className = 'chess-piece ' + this.getColor(piece);
-                pieceEl.textContent = this.pieces[piece]; square.appendChild(pieceEl);
+                pieceEl.textContent = pieceSet[piece]; square.appendChild(pieceEl);
             }
             square.onclick = () => this.onSquareClick(r, c); boardEl.appendChild(square);
         }
-        document.getElementById('chess-captured-black').innerHTML = this.capturedBlack.map(p => `<span style="color:#000">${this.pieces[p]}</span>`).join('');
-        document.getElementById('chess-captured-white').innerHTML = this.capturedWhite.map(p => `<span style="color:#fff;text-shadow:0 0 2px #000">${this.pieces[p]}</span>`).join('');
+        document.getElementById('chess-captured-black').innerHTML = this.capturedBlack.map(p => `<span style="color:#000">${pieceSet[p]}</span>`).join('');
+        document.getElementById('chess-captured-white').innerHTML = this.capturedWhite.map(p => `<span style="color:#fff;text-shadow:0 0 2px #000">${pieceSet[p]}</span>`).join('');
     },
     updateInfo() {
         const status = document.getElementById('chess-status');
@@ -5153,7 +5476,7 @@ if (this.gameOver) return;
         document.getElementById('chess-mode').textContent = modeText;
         const historyEl = document.getElementById('chess-history');
         historyEl.innerHTML = this.moveHistory.map((h, i) => {
-            const piece = this.pieces[h.piece], from = String.fromCharCode(97 + h.move.from[1]) + (8 - h.move.from[0]), to = String.fromCharCode(97 + h.move.to[1]) + (8 - h.move.to[0]), capture = h.captured ? 'x' : '';
+            const piece = Shop.getChessPieceSet()[h.piece], from = String.fromCharCode(97 + h.move.from[1]) + (8 - h.move.from[0]), to = String.fromCharCode(97 + h.move.to[1]) + (8 - h.move.to[0]), capture = h.captured ? 'x' : '';
             return `<div class="chess-history-item">${Math.floor(i / 2) + 1}${i % 2 === 0 ? '.' : '..'} ${piece}${from}${capture}${to}</div>`;
         }).reverse().join('');
     },
@@ -5205,54 +5528,139 @@ if (this.gameOver) return;
 <div>Moves: ${this.moveCount}</div>
 </div>
 <div class="pop-btns">
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="chess-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="Chess.restart();UI.closePopup()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="Chess.quit();UI.closePopup()"><i class="fas fa-home"></i><span>Menu</span></button>
 </div>`;
-        document.getElementById('mg-go-ov').classList.add('active');
+const adBtn = document.getElementById('chess-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
+document.getElementById('mg-go-ov').classList.add('active');
     }
 };
 // ============================================================
 // SHOP
 // ============================================================
 const Shop = {
-    currentTab: 'bird',
+    currentTab: 'marble',
     skins: {
+        marble: [
+            { id: 'classic', name: 'Classic Blue', color: '#2196F3', price: 0, icon: '🔵' },
+            { id: 'green', name: 'Emerald', color: '#4CAF50', price: 50, icon: '🟢' },
+            { id: 'red', name: 'Ruby', color: '#f44336', price: 50, icon: '🔴' },
+            { id: 'gold', name: 'Gold', color: '#FFD700', price: 100, icon: '🟡' },
+            { id: 'galaxy', name: 'Galaxy', color: '#9C27B0', price: 150, icon: '🟣' },
+            { id: 'neon', name: 'Neon', color: '#00e676', price: 200, icon: '🟩' }
+        ],
         bird: [
-            { id: 'classic', name: 'Sparrow', color: '#A0522D', price: 0, icon: '🐦' },
-            { id: 'eagle', name: 'Eagle', color: '#4A3018', price: 50, icon: '🦅' },
-            { id: 'falcon', name: 'Falcon', color: '#555555', price: 75, icon: '🦅' },
-            { id: 'owl', name: 'Owl', color: '#8B5A2B', price: 100, icon: '🦉' },
-            { id: 'parrot', name: 'Parrot', color: '#00FF00', price: 125, icon: '🦜' },
-            { id: 'crow', name: 'Crow', color: '#111111', price: 150, icon: '🐦‍⬛' },
-            { id: 'kingfisher', name: 'Kingfisher', color: '#00BFFF', price: 175, icon: '🐦' },
-            { id: 'peacock', name: 'Peacock', color: '#008080', price: 200, icon: '🦚' },
-            { id: 'penguin', name: 'Penguin', color: '#000000', price: 250, icon: '🐧' },
-            { id: 'flamingo', name: 'Flamingo', color: '#FF69B4', price: 300, icon: '🦩' }
+            { id: 'classic', name: 'Sparrow', color: '#D2691E', price: 0, icon: '🐦' },
+            { id: 'eagle', name: 'Eagle', color: '#4A3018', price: 100, icon: '🦅' },
+            { id: 'owl', name: 'Owl', color: '#8B5A2B', price: 150, icon: '🦉' },
+            { id: 'parrot', name: 'Parrot', color: '#00FF00', price: 200, icon: '🦜' },
+            { id: 'penguin', name: 'Penguin', color: '#000000', price: 300, icon: '🐧' },
+            { id: 'flamingo', name: 'Flamingo', color: '#FF69B4', price: 350, icon: '🦩' }
         ],
         enemy: [
-            { id: 'classic', name: 'Classic Zombie', color: '#556b2f', price: 0, icon: '🧟' },
-            { id: 'robot', name: 'Robot', color: '#708090', price: 75, icon: '🤖' },
-            { id: 'alien', name: 'Alien', color: '#9b59b6', price: 100, icon: '👽' },
-            { id: 'ninja', name: 'Ninja', color: '#2c3e50', price: 150, icon: '🥷' }
+            { id: 'classic', name: 'Zombie', color: '#556b2f', price: 0, icon: '🧟' },
+            { id: 'robot', name: 'Robot', color: '#708090', price: 100, icon: '🤖' },
+            { id: 'alien', name: 'Alien', color: '#9b59b6', price: 150, icon: '👽' },
+            { id: 'ninja', name: 'Ninja', color: '#2c3e50', price: 200, icon: '🥷' }
+        ],
+        ball: [
+            { id: 'classic', name: 'Plain Ball', color: '#3742fa', price: 0, icon: '🔵' },
+            { id: 'basketball', name: 'Basketball', color: '#ff8c00', price: 75, icon: '🏀' },
+            { id: 'baseball', name: 'Baseball', color: '#ffffff', price: 75, icon: '⚾' },
+            { id: 'tennis', name: 'Tennis Ball', color: '#ccff00', price: 100, icon: '🎾' },
+            { id: 'earth', name: 'Earth', color: '#1b5e20', price: 150, icon: '🌍' }
+        ],
+        critter: [
+            { id: 'classic', name: 'Mole', color: '#8d6e63', price: 0, icon: '🐹' },
+            { id: 'bunny', name: 'Bunny', color: '#e0e0e0', price: 75, icon: '🐰' },
+            { id: 'fox', name: 'Fox', color: '#ff5722', price: 100, icon: '🦊' },
+            { id: 'frog', name: 'Frog', color: '#4caf50', price: 100, icon: '🐸' },
+            { id: 'panda', name: 'Panda', color: '#000000', price: 150, icon: '🐼' }
+        ],
+        castle: [
+            { id: 'classic', name: 'Stone Castle', color: '#607d8b', price: 0, icon: '🏰' },
+            { id: 'sand', name: 'Sand Castle', color: '#d4af37', price: 100, icon: '🏝️' },
+            { id: 'ice', name: 'Ice Fortress', color: '#4fc3f7', price: 150, icon: '🧊' },
+            { id: 'forest', name: 'Treehouse', color: '#388e3c', price: 200, icon: '🌲' }
+        ],
+        hero: [
+            { id: 'classic', name: 'Knight', color: '#bbdefb', price: 0, icon: '🧝' },
+            { id: 'wizard', name: 'Wizard', color: '#ce93d8', price: 100, icon: '🧙' },
+            { id: 'archer', name: 'Archer', color: '#ffcc80', price: 100, icon: '🤺' },
+            { id: 'barbarian', name: 'Barbarian', color: '#e57373', price: 150, icon: '🪓' },
+            { id: 'necromancer', name: 'Necromancer', color: '#263238', price: 200, icon: '💀' }
+        ],
+        chess: [
+            { id: 'classic', name: 'Classic', color: '#000', price: 0, icon: '♔' },
+            { id: 'emoji', name: 'Emoji', color: '#000', price: 150, icon: '🤴' },
+            { id: 'fantasy', name: 'Fantasy', color: '#000', price: 200, icon: '🐉' }
+        ],
+        disc: [
+            { id: 'classic', name: 'Red/Yellow', colorLight: '#ff8a8a', color: '#e74c3c', colorDark: '#c0392b', price: 0, icon: '🔴' },
+            { id: 'blue', name: 'Blue/Green', colorLight: '#82e0de', color: '#3498db', colorDark: '#21618c', price: 75, icon: '🔵' },
+            { id: 'gold', name: 'Gold/Silver', colorLight: '#ffe680', color: '#f1c40f', colorDark: '#d4ac0d', price: 100, icon: '🟡' },
+            { id: 'neon', name: 'Neon', colorLight: '#ccff00', color: '#a3e635', colorDark: '#65a30d', price: 150, icon: '🟢' }
+        ],
+        cardback: [
+            { id: 'classic', name: 'Question', color: '#D4A017', price: 0, icon: '<i class="fas fa-question"></i>' },
+            { id: 'star', name: 'Star', color: '#e74c3c', price: 75, icon: '<i class="fas fa-star"></i>' },
+            { id: 'heart', name: 'Heart', color: '#ff69b4', price: 75, icon: '<i class="fas fa-heart"></i>' },
+            { id: 'diamond', name: 'Diamond', color: '#3498db', price: 100, icon: '<i class="fas fa-gem"></i>' }
+        ],
+        disk: [
+            { id: 'classic', name: 'Rainbow', color: 'rainbow', price: 0, icon: '🌈' },
+            { id: 'wood', name: 'Wood', color: 'linear-gradient(135deg, #8d6e63, #5d4037)', price: 75, icon: '🪵' },
+            { id: 'metal', name: 'Metal', color: 'linear-gradient(135deg, #b0bec5, #455a64)', price: 100, icon: '⚙️' },
+            { id: 'fire', name: 'Fire', color: 'linear-gradient(135deg, #ff5722, #b71c1c)', price: 150, icon: '🔥' }
+        ],
+        symbol: [
+            { id: 'classic', name: 'X & O', x: 'X', o: 'O', price: 0, icon: '❌' },
+            { id: 'emoji', name: 'Cross & Circle', x: '❌', o: '⭕', price: 75, icon: '⭕' },
+            { id: 'honor', name: 'Skull & Crown', x: '💀', o: '👑', price: 100, icon: '👑' },
+            { id: 'nature', name: 'Sun & Moon', x: '☀️', o: '🌙', price: 150, icon: '🌙' }
+        ],
+        striker: [
+            { id: 'classic', name: 'Blue Striker', color: 'rgba(60,110,220,0.85)', price: 0, icon: '🔵' },
+            { id: 'red', name: 'Red Striker', color: 'rgba(220,60,60,0.85)', price: 75, icon: '🔴' },
+            { id: 'gold', name: 'Gold Striker', color: 'rgba(220,180,60,0.85)', price: 150, icon: '🟡' },
+            { id: 'neon', name: 'Neon Striker', color: 'rgba(60,255,136,0.85)', price: 200, icon: '🟢' }
         ]
     },
     open() {
         document.getElementById('shop-overlay').classList.add('active');
         this.updateCoins();
+        this.renderTabs();
         this.renderGrid();
     },
     close() {
         document.getElementById('shop-overlay').classList.remove('active');
     },
-    switchTab(tab, el) {
+    renderTabs() {
+        const tabsEl = document.getElementById('shop-tabs');
+        const categories = Object.keys(this.skins);
+        tabsEl.innerHTML = categories.map(cat => 
+            `<div class="shop-tab ${cat === this.currentTab ? 'active' : ''}" onclick="Shop.switchTab('${cat}')">${cat.charAt(0).toUpperCase() + cat.slice(1)}s</div>`
+        ).join('');
+    },
+    switchTab(tab) {
         this.currentTab = tab;
-        document.querySelectorAll('.shop-tab').forEach(t => t.classList.remove('active'));
-        if (el) el.classList.add('active');
-        else {
-            const tabs = document.querySelectorAll('.shop-tab');
-            const idx = { bird: 0, enemy: 1 }[tab];
-            if (tabs[idx]) tabs[idx].classList.add('active');
-        }
+        this.renderTabs();
         this.renderGrid();
     },
     updateCoins() {
@@ -5263,56 +5671,121 @@ const Shop = {
         const owned = Store.get('ownedSkins', Store.defaults.ownedSkins);
         const equipped = Store.get('equippedSkins', Store.defaults.equippedSkins);
         const items = this.skins[this.currentTab];
+        
         grid.innerHTML = items.map(skin => {
-            const isOwned = owned[this.currentTab].includes(skin.id);
+            const isOwned = owned[this.currentTab] && owned[this.currentTab].includes(skin.id);
             const isEquipped = equipped[this.currentTab] === skin.id;
-            let statusText = '', btnText = '', btnDisabled = false;
-            if (isEquipped) { statusText = 'Equipped'; btnText = 'Equipped'; btnDisabled = true; }
-            else if (isOwned) { statusText = 'Owned'; btnText = 'Equip'; }
-            else { statusText = `${skin.price} coins`; btnText = 'Buy'; }
+            let statusText = '', btnText = '', btnDisabled = false, btnAction = '';
+            
+            if (isEquipped) { 
+                statusText = 'Equipped'; 
+                btnText = 'Equipped'; 
+                btnDisabled = true;
+                btnAction = '';
+            } else if (isOwned) { 
+                statusText = 'Owned'; 
+                btnText = 'Equip'; 
+                btnAction = `Shop.handleAction('${this.currentTab}', '${skin.id}')`;
+            } else { 
+                statusText = `${skin.price} coins`; 
+                btnText = 'Buy'; 
+                btnAction = `Shop.showPurchasePopup('${this.currentTab}', '${skin.id}')`;
+            }
+
+            let previewStyle = `background:${skin.color || skin.colorLight || '#333'}20`;
+            let previewContent = `<span style="font-size:2rem">${skin.icon}</span>`;
+            if (this.currentTab === 'chess' && skin.id === 'emoji') {
+                previewContent = `<span style="font-size:2rem">🤴👸</span>`;
+            } else if (this.currentTab === 'symbol') {
+                previewContent = `<span style="font-size:1.5rem;font-weight:bold;color:${skin.id==='classic'?'#ff6b6b':'var(--acc)'}">${skin.x}</span>`;
+            }
+
             return `
 <div class="shop-item ${isEquipped ? 'equipped' : ''}">
-<div class="shop-item-preview" style="background:${skin.color}20">
-<span style="font-size:2rem">${skin.icon}</span>
+<div class="shop-item-preview" style="${previewStyle}">
+ ${previewContent}
 </div>
 <div class="shop-item-name">${skin.name}</div>
 <div class="shop-item-status">${statusText}</div>
-<button class="shop-item-btn" onclick="Shop.handleAction('${this.currentTab}', '${skin.id}')" ${btnDisabled ? 'disabled' : ''}>${btnText}</button>
+<button class="shop-item-btn" ${btnDisabled ? 'disabled' : ''} onclick="${btnAction}">${btnText}</button>
 </div>
 `;
         }).join('');
     },
-    handleAction(category, skinId) {
-        const owned = Store.get('ownedSkins', Store.defaults.ownedSkins);
-        const equipped = Store.get('equippedSkins', Store.defaults.equippedSkins);
+    showPurchasePopup(category, skinId) {
         const skin = this.skins[category].find(s => s.id === skinId);
         if (!skin) return;
-        if (owned[category].includes(skinId)) {
-            equipped[category] = skinId;
-            Store.set('equippedSkins', equipped);
-            Audio.click();
-            UI.toast(`Equipped ${skin.name}!`, 's');
-        } else {
-            const coins = Store.get('coins', 0);
-            if (coins >= skin.price) {
-                Store.set('coins', coins - skin.price);
-                owned[category].push(skinId);
-                Store.set('ownedSkins', owned);
-                equipped[category] = skinId;
-                Store.set('equippedSkins', equipped);
-                Audio.purchase();
-                UI.toast(`Purchased ${skin.name}!`, 's');
-            } else {
-                UI.toast('Not enough coins!','e');
-                return;
-            }
-        }
+        const coins = Store.get('coins', 0);
+        const canAfford = coins >= skin.price;
+
+        const pop = document.getElementById('game-pop');
+        pop.innerHTML = `
+            <div class="pop-t">Confirm Purchase</div>
+            <div class="pop-p">
+                <div style="font-size:3rem;margin-bottom:10px">${skin.icon}</div>
+                <div style="font-size:1.1rem;color:var(--t1);margin-bottom:5px">${skin.name}</div>
+                <div style="color:var(--t2)">Price: <strong style="color:var(--acc)">${skin.price} Coins</strong></div>
+                <div style="color:var(--t2)">Your Balance: <strong style="color:${canAfford ? 'var(--ok)' : 'var(--err)'}">${coins} Coins</strong></div>
+            </div>
+            <div class="pop-btns">
+                <button class="btn btn-p" ${!canAfford ? 'disabled style="opacity:0.5;cursor:not-allowed"' : ''} onclick="Shop.confirmPurchase('${category}', '${skin.id}')">
+                    <i class="fas fa-check"></i><span>${canAfford ? 'Confirm Buy' : 'Not Enough Coins'}</span>
+                </button>
+                <button class="btn" onclick="UI.closeGameOverlay()">
+                    <i class="fas fa-times"></i><span>Cancel</span>
+                </button>
+            </div>
+        `;
+        document.getElementById('game-overlay').classList.add('active');
+    },
+    confirmPurchase(category, skinId) {
+        const skin = this.skins[category].find(s => s.id === skinId);
+        if (!skin) return;
+        const coins = Store.get('coins', 0);
+        if (coins < skin.price) return;
+
+        Store.set('coins', coins - skin.price);
+        const owned = Store.get('ownedSkins', Store.defaults.ownedSkins);
+        if (!owned[category]) owned[category] = [];
+        owned[category].push(skinId);
+        Store.set('ownedSkins', owned);
+
+        const equipped = Store.get('equippedSkins', Store.defaults.equippedSkins);
+        equipped[category] = skinId;
+        Store.set('equippedSkins', equipped);
+
+        Audio.purchase();
+        UI.closeGameOverlay();
+        UI.toast(`Purchased and equipped ${skin.name}!`, 's');
         this.updateCoins();
         this.renderGrid();
+        if (category === 'marble' && GS.playing) UI.renderBoard();
+    },
+    handleAction(category, skinId) {
+        const equipped = Store.get('equippedSkins', Store.defaults.equippedSkins);
+        equipped[category] = skinId;
+        Store.set('equippedSkins', equipped);
+        Audio.click();
+        UI.toast(`Equipped!`, 's');
+        this.renderGrid();
+        if (category === 'marble' && GS.playing) UI.renderBoard();
     },
     getSkinColor(category, skinId) {
         const skin = this.skins[category].find(s => s.id === skinId);
-        return skin ? skin.color : '#f1c40f';
+        return skin ? (skin.color || skin.colorLight || '#f1c40f') : '#f1c40f';
+    },
+    getSkinEmoji(category, skinId) {
+        const skin = this.skins[category].find(s => s.id === skinId);
+        return skin ? skin.icon : '❓';
+    },
+    getChessPieceSet() {
+        const chessSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).chess || 'classic';
+        if (chessSkin === 'emoji') {
+            return { 'K': '🤴', 'Q': '👸', 'R': '🏰', 'B': '🧙', 'N': '🐎', 'P': '🛡️', 'k': '👹', 'q': '🧟‍♀️', 'r': '🏚️', 'b': '🧛', 'n': '🦄', 'p': '⚔️' };
+        } else if (chessSkin === 'fantasy') {
+            return { 'K': '👑', 'Q': '🧚', 'R': '🗿', 'B': '🔮', 'N': '🐉', 'P': '🗡️', 'k': '💀', 'q': '🧟', 'r': '🪦', 'b': '🦇', 'n': '🐺', 'p': '🦴' };
+        }
+        return { 'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙', 'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟' };
     }
 };
 // ============================================================
@@ -5387,6 +5860,10 @@ boardEl.style.gap = '20px';
 boardEl.style.padding = '10px';
 boardEl.style.background = 'var(--card)';
 boardEl.style.borderRadius = '12px';
+
+const diskSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).disk || 'classic';
+const skinData = Shop.skins.disk.find(s => s.id === diskSkin);
+
 for (let p = 0; p < 3; p++) {
 const pegDiv = document.createElement('div');
 pegDiv.className = 'hanoi-peg';
@@ -5426,7 +5903,7 @@ const width = 20 + (d / maxDisk) * 60;
 disk.className = 'hanoi-disk' + (this.selected && this.selected[0] === p && this.selected[1] === idx ? ' selected' : '');
 disk.style.width = width + '%';
 disk.style.height = 'clamp(12px, 2.5vw, 20px)';
-disk.style.background = `hsl(${d * 40}, 70%, 50%)`;
+disk.style.background = skinData ? skinData.color : `hsl(${d * 40}, 70%, 50%)`;
 disk.style.borderRadius = '4px';
 disk.style.zIndex = '1';
 disk.style.minHeight = '10px';
@@ -5493,9 +5970,26 @@ Confetti.rain();
 const minMoves = Math.pow(2, this.disks) - 1;
 const isPerfect = this.moves === minMoves;
 UI.showGameOverlay('Puzzle Solved!', `Completed in ${this.moves} moves (minimum is ${minMoves})${isPerfect ? ' 🏆 PERFECT!' : ''}`, `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="hanoi-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="TowerOfHanoi.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="TowerOfHanoi.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
+const adBtn = document.getElementById('hanoi-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
 },
 updateUI() {
 const movesEl = document.getElementById('hanoi-moves');
@@ -5650,6 +6144,10 @@ colIndicator.appendChild(btn);
 boardWrap.appendChild(colIndicator);
 const boardEl = document.createElement('div');
 boardEl.className = 'cf-board';
+
+const discSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).disc || 'classic';
+const skinData = Shop.skins.disc.find(s => s.id === discSkin);
+
 for (let r = 0; r < this.ROWS; r++) {
 for (let c = 0; c < this.COLS; c++) {
 const cell = document.createElement('div');
@@ -5660,6 +6158,9 @@ const val = this.board[r][c];
 if (val > 0) {
 const piece = document.createElement('div');
 piece.className = 'cf-piece ' + (val === 1 ? 'p1' : 'p2');
+if (skinData) {
+    piece.style.background = `radial-gradient(circle at 35% 30%, ${skinData.colorLight}, ${skinData.color} 60%, ${skinData.colorDark})`;
+}
 if (this.winCells.some(wc => wc[0] === r && wc[1] === c)) {
 piece.classList.add('winning');
 }
@@ -5777,16 +6278,36 @@ Fireworks.launch();
 Confetti.rain();
 const winnerName = this.winner === 1 ? this.player1Name : this.player2Name;
 UI.showGameOverlay('Victory!', `${winnerName} wins in ${this.moves} moves!`, `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="cf-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="ConnectFour.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="ConnectFour.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
 } else {
 Audio.genericDraw();
 UI.showGameOverlay('Draw!', 'The board is full. No winner this time.', `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="cf-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="ConnectFour.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="ConnectFour.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
 }
+const adBtn = document.getElementById('cf-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
 },
 aiMove() {
 if (this.gameOver || this.animating || this.paused) return;
@@ -5927,7 +6448,7 @@ if (nr < 0 || nr >= this.ROWS || nc < 0 || nc >= this.COLS) { valid = false; bre
 cells.push(this.board[nr][nc]);
 }
 if (!valid) continue;
-score += this.scoreWindow(cells);
+score += this.scorewindow(cells);
 }
 }
 }
@@ -6139,6 +6660,10 @@ const boardEl = document.createElement('div');
 boardEl.className = 'mem-board';
 boardEl.style.gridTemplateColumns = `repeat(${this.boardSize.cols}, 1fr)`;
 boardEl.style.gridTemplateRows = `repeat(${this.boardSize.rows}, 1fr)`;
+
+const cardbackSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).cardback || 'classic';
+const skinData = Shop.skins.cardback.find(s => s.id === cardbackSkin);
+
 this.cards.forEach((card, idx) => {
 const cell = document.createElement('div');
 cell.className = 'mem-card';
@@ -6149,7 +6674,7 @@ const inner = document.createElement('div');
 inner.className = 'mem-card-inner';
 const back = document.createElement('div');
 back.className = 'mem-face mem-back';
-back.innerHTML = '<i class="fas fa-question"></i>';
+back.innerHTML = skinData ? skinData.icon : '<i class="fas fa-question"></i>';
 const front = document.createElement('div');
 front.className = 'mem-face mem-front';
 front.textContent = card.icon;
@@ -6246,6 +6771,7 @@ Store.set('memory', stats);
 Audio.victory();
 Fireworks.launch();
 Confetti.rain();
+setTimeout(function() { showInterstitialAd(); }, 2000);
 const m = Math.floor(this.time / 60), s = this.time % 60;
 UI.showGameOverlay('You Win!',
 `Score: <strong>${this.score}</strong><br>
@@ -6253,9 +6779,25 @@ Moves: ${this.moves}<br>
 Time: ${m}:${s.toString().padStart(2, '0')}<br>
 Max Combo: x${this.maxCombo}`,
 `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="mem-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="MemoryGame.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="MemoryGame.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
+const adBtn = document.getElementById('mem-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
 },
 updateUI() {
 const movesEl = document.getElementById('mem-moves');
@@ -6433,6 +6975,12 @@ container.appendChild(boardWrap);
 }
 const boardEl = document.createElement('div');
 boardEl.className = 'ttt-board';
+
+const symbolSkin = Store.get('equippedSkins', Store.defaults.equippedSkins).symbol || 'classic';
+const skinData = Shop.skins.symbol.find(s => s.id === symbolSkin);
+const xSym = skinData ? skinData.x : 'X';
+const oSym = skinData ? skinData.o : 'O';
+
 for (let i = 0; i < 9; i++) {
 const cell = document.createElement('div');
 cell.className = 'ttt-cell';
@@ -6440,7 +6988,7 @@ if (this.board[i] === 'X') cell.classList.add('x');
 if (this.board[i] === 'O') cell.classList.add('o');
 if (this.winningCells.includes(i)) cell.classList.add('win');
 if (this.gameOver) cell.classList.add('disabled');
-cell.textContent = this.board[i] || '';
+cell.textContent = this.board[i] === 'X' ? xSym : (this.board[i] === 'O' ? oSym : '');
 cell.dataset.idx = i;
 cell.addEventListener('click', () => this.onCellClick(i));
 boardEl.appendChild(cell);
@@ -6598,9 +7146,26 @@ Confetti.rain();
 Audio.genericDraw();
 }
 UI.showGameOverlay('Game Over', `${msg} (${this.moveHistory.length} moves)`, `
+<button class="btn" style="border-color:#00ff88;color:#00ff88" id="ttt-reward-ad">
+  <i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span>
+</button>
 <button class="btn btn-p" onclick="TicTacToe.restart();UI.closeGameOverlay()"><i class="fas fa-redo"></i><span>Play Again</span></button>
 <button class="btn" onclick="TicTacToe.quit();UI.closeGameOverlay()"><i class="fas fa-home"></i><span>Home</span></button>
 `);
+const adBtn = document.getElementById('ttt-reward-ad');
+if (adBtn) {
+  adBtn.onclick = () => {
+    showRewardAd(function(success) {
+      if (success) {
+        const coins = Store.get('coins', 0);
+        Store.set('coins', coins + 25);
+        UI.toast('Reward: +25 coins!', 's');
+        adBtn.remove();
+      }
+    }, 'double');
+  };
+}
+setTimeout(function() { showInterstitialAd(); }, 2000);
 this.render();
 this.updateUI();
 },
@@ -7010,6 +7575,8 @@ const CastleDefense = {
           <div id="cd-endScreen" style="position:absolute; inset:0; background:rgba(0,0,0,0.65); display:none; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; z-index:30; padding:20px;">
             <h1 style="font-size:32px; margin-bottom:8px; text-shadow:0 3px 8px rgba(0,0,0,0.5);">💥 The Castle Has Fallen</h1>
             <div id="cd-statsBox" style="font-size:16px; margin:10px 0 18px; line-height:1.6;"></div>
+          <button class="btn" style="border-color:#ff5252;color:#ff5252; margin:6px;" id="cd-revive-ad"><i class="fas fa-heart"></i><span>Watch Ad: Continue</span></button>
+            <button class="btn" style="border-color:#00ff88;color:#00ff88; margin:6px;" id="cd-reward-ad"><i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span></button>
             <button id="cd-restartBtn" style="padding:14px 30px; font-size:17px; font-weight:bold; border:none; border-radius:28px; background:#ffd32a; color:#3e2b00; cursor:pointer; box-shadow:0 6px 14px rgba(0,0,0,0.4); margin:6px;">Play Again</button>
             <button id="cd-quitEndBtn" style="padding:14px 30px; font-size:17px; font-weight:bold; border:none; border-radius:28px; background:#e74c3c; color:#fff; cursor:pointer; box-shadow:0 6px 14px rgba(0,0,0,0.4); margin:6px;">Quit to Menu</button>
           </div>
@@ -7155,7 +7722,7 @@ const CastleDefense = {
             { key:'crit', label:'🎯 Crit Chance', base:20, mult:1.6, apply:(p)=>p.crit = Math.min(0.6, p.crit + 0.05) },
         ];
 
-        let mode = 'solo'; let running = false; let elapsed = 0; let lastTime = 0;
+        let mode = 'solo'; let running = false; let elapsed = 0; let lastTime = 0; let reviveUsed = false;
         let castle, players, enemies, projectiles, coinsGround, powerupsGround, floatTexts;
         let coins = 0, kills = 0, score = 0; let buffs = {};
         let enemySpawnTimer = 0, powerupSpawnTimer = 0, bossTimer = 0;
@@ -7167,12 +7734,14 @@ const CastleDefense = {
         }
         function initGame(selectedMode) {
             mode = selectedMode; castle = { x: cx(), y: cy(), radius: 46, hp: 500, maxHp: 500 }; players = [];
-            players.push(makePlayer(1, {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',attack:'Space'}, '#3a8bd6', '🧝', -40));
+            const heroSkin = Shop.getSkinEmoji('hero', Store.get('equippedSkins', Store.defaults.equippedSkins).hero || 'classic');
+            const p1Emoji = heroSkin !== '❓' ? heroSkin : '🧝';
+            players.push(makePlayer(1, {up:'KeyW',down:'KeyS',left:'KeyA',right:'KeyD',attack:'Space'}, '#3a8bd6', p1Emoji, -40));
             if (mode === 'coop') { players.push(makePlayer(2, {up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',attack:'Enter'}, '#e74c3c', '🧙‍♂️', 40)); }
             enemies = []; projectiles = []; coinsGround = []; powerupsGround = []; floatTexts = [];
             coins = 0; kills = 0; score = 0; elapsed = 0; difficultyLevel = 0; buffs = {};
             enemySpawnTimer = 0; powerupSpawnTimer = 6; bossTimer = 90;
-            upgradeLevels = { damage:0, atkspeed:0, movespeed:0, health:0, crit:0 }; running = true;
+            upgradeLevels = { damage:0, atkspeed:0, movespeed:0, health:0, crit:0 }; running = true; reviveUsed = false;
             startScreen.style.display = 'none'; endScreen.style.display = 'none';
             renderPlayerBars(); lastTime = performance.now(); requestAnimationFrame(loop);
         }
@@ -7313,7 +7882,8 @@ const CastleDefense = {
         function render() {
             ctx.clearRect(0,0,canvas.width,canvas.height);
             ctx.beginPath(); ctx.arc(castle.x, castle.y, 130, 0, Math.PI*2); ctx.fillStyle = 'rgba(120,90,50,0.25)'; ctx.fill();
-            ctx.font = `70px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🏰', castle.x, castle.y);
+            const castleSkin = Shop.getSkinEmoji('castle', Store.get('equippedSkins', Store.defaults.equippedSkins).castle || 'classic');
+            ctx.font = `70px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(castleSkin !== '❓' ? castleSkin : '🏰', castle.x, castle.y);
             ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(castle.x-40, castle.y+40, 80, 5); ctx.fillStyle = '#3a8bd6'; ctx.fillRect(castle.x-40, castle.y+40, 80*Math.max(0,castle.hp/castle.maxHp), 5);
             coinsGround.forEach(c => { ctx.font = `20px serif`; ctx.fillText('🪙', c.x, c.y); });
             powerupsGround.forEach(pu => { ctx.font = `26px serif`; ctx.fillText(pu.emoji, pu.x, pu.y); });
@@ -7331,13 +7901,51 @@ const CastleDefense = {
             floatTexts.forEach(f => { ctx.globalAlpha = Math.max(0, f.life / 0.8); ctx.fillStyle = f.color; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText(f.text, f.x, f.y); ctx.globalAlpha = 1; });
         }
         function loop(now) { const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now; update(dt); render(); if (running) requestAnimationFrame(loop); }
-        function endGame() {
+       function endGame() {
             running = false; shopPanel.style.display = 'none'; shopOpen = false;
             statsBox.innerHTML = `Survived: <b>${Math.floor(elapsed)}s</b><br>Enemies Defeated: <b>${kills}</b><br>Final Score: <b>${score}</b>`;
             const stats = Store.get('castledefense', Store.defaults.castledefense);
             stats.played = (stats.played || 0) + 1;
             if (score > (stats.best || 0)) stats.best = score;
             Store.set('castledefense', stats);
+
+            const cdReviveBtn = document.getElementById('cd-revive-ad');
+            if (cdReviveBtn) {
+                if (reviveUsed) {
+                    cdReviveBtn.style.display = 'none';
+                } else {
+                    cdReviveBtn.style.display = '';
+                    cdReviveBtn.onclick = () => {
+                        showRewardAd(function(success) {
+                            if (success) {
+                                reviveUsed = true;
+                                endScreen.style.display = 'none';
+                                castle.hp = castle.maxHp * 0.5;
+                                enemies = enemies.filter(e => Math.hypot(e.x - castle.x, e.y - castle.y) > 250);
+                                running = true;
+                                UI.toast('Castle restored! Keep defending!', 's');
+                                lastTime = performance.now();
+                                requestAnimationFrame(loop);
+                            }
+                        }, 'revive');
+                    };
+                }
+            }
+
+            const cdAdBtn = document.getElementById('cd-reward-ad');
+            if (cdAdBtn) {
+                cdAdBtn.onclick = () => {
+                    showRewardAd(function(success) {
+                        if (success) {
+                            const coins = Store.get('coins', 0);
+                            Store.set('coins', coins + 25);
+                            UI.toast('Reward: +25 coins!', 's');
+                            cdAdBtn.remove();
+                        }
+                    }, 'double');
+                };
+            }
+            setTimeout(function() { showInterstitialAd(); }, 2000);
             setTimeout(() => { endScreen.style.display = 'flex'; }, 400);
         }
         
@@ -7410,6 +8018,8 @@ const EndlessDungeon = {
           <div id="ed-endScreen" style="position:absolute; inset:0; background:rgba(0,0,0,0.68); display:none; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; z-index:30; padding:20px;">
             <h1 style="font-size:30px; margin-bottom:8px; text-shadow:0 3px 8px rgba(0,0,0,0.5);">💀 You Perished</h1>
             <div id="ed-statsBox" style="font-size:16px; margin:10px 0 18px; line-height:1.7;"></div>
+          <button class="btn" style="border-color:#ff5252;color:#ff5252; margin:6px;" id="ed-revive-ad"><i class="fas fa-heart"></i><span>Watch Ad: Continue</span></button>
+            <button class="btn" style="border-color:#00ff88;color:#00ff88; margin:6px;" id="ed-reward-ad"><i class="fas fa-coins"></i><span>Watch Ad: +25 Coins</span></button>
             <button id="ed-restartBtn" style="padding:14px 34px; font-size:18px; font-weight:bold; border:none; border-radius:28px; background:#ffd32a; color:#3e2b00; cursor:pointer; box-shadow:0 6px 14px rgba(0,0,0,0.4); margin:6px;">Try Again</button>
             <button id="ed-quitEndBtn" style="padding:14px 34px; font-size:18px; font-weight:bold; border:none; border-radius:28px; background:#e74c3c; color:#fff; cursor:pointer; box-shadow:0 6px 14px rgba(0,0,0,0.4); margin:6px;">Quit to Menu</button>
           </div>
@@ -7487,6 +8097,7 @@ const EndlessDungeon = {
         ];
 
         let running = false;
+        let reviveUsed = false;
         let player, room, enemies, projectiles, pickups, traps, chest, floatTexts;
         let depth = 1, coins = 0, kills = 0, score = 0, elapsed = 0, lastTime = 0;
         let roomCleared = false;
@@ -7604,6 +8215,7 @@ const EndlessDungeon = {
 
         function initGame() {
           player = makePlayer();
+          reviveUsed = false;
           depth = 1; coins = 0; kills = 0; score = 0; elapsed = 0;
           statLevels = { damage:0, atkspeed:0, speed:0, health:0, crit:0 };
           floatTexts = [];
@@ -7615,7 +8227,7 @@ const EndlessDungeon = {
           requestAnimationFrame(loop);
         }
 
-        function endGame() {
+      function endGame() {
           running = false;
           statsBox.innerHTML = `
             Depth Reached: <b>${depth}</b><br>
@@ -7627,6 +8239,44 @@ const EndlessDungeon = {
           stats.played = (stats.played || 0) + 1;
           if (score > (stats.best || 0)) stats.best = score;
           Store.set('dungeon', stats);
+
+          const edReviveBtn = document.getElementById('ed-revive-ad');
+          if (edReviveBtn) {
+            if (reviveUsed) {
+              edReviveBtn.style.display = 'none';
+            } else {
+              edReviveBtn.style.display = '';
+              edReviveBtn.onclick = () => {
+                showRewardAd(function(success) {
+                    if (success) {
+                        reviveUsed = true;
+                        endScreen.style.display = 'none';
+                        player.hp = player.maxHp * 0.5;
+                        enemies = enemies.filter(e => Math.hypot(e.x - player.x, e.y - player.y) > 200);
+                        running = true;
+                        UI.toast('Revived! Keep fighting!', 's');
+                        lastTime = performance.now();
+                        requestAnimationFrame(loop);
+                    }
+                }, 'revive');
+              };
+            }
+          }
+
+          const edAdBtn = document.getElementById('ed-reward-ad');
+          if (edAdBtn) {
+            edAdBtn.onclick = () => {
+                showRewardAd(function(success) {
+                    if (success) {
+                        const coins = Store.get('coins', 0);
+                        Store.set('coins', coins + 25);
+                        UI.toast('Reward: +25 coins!', 's');
+                        edAdBtn.remove();
+                    }
+                }, 'double');
+            };
+          }
+          setTimeout(function() { showInterstitialAd(); }, 2000);
           setTimeout(()=>{ endScreen.style.display='flex'; }, 400);
         }
 
@@ -7882,7 +8532,8 @@ const EndlessDungeon = {
             ctx.fill();
           });
 
-          drawEmoji('🧍', player.x, player.y, 32);
+          const heroSkin = Shop.getSkinEmoji('hero', Store.get('equippedSkins', Store.defaults.equippedSkins).hero || 'classic');
+          drawEmoji(heroSkin !== '❓' ? heroSkin : '🧍', player.x, player.y, 32);
           drawHpBar(player.x, player.y-24, 34, player.hp/player.maxHp, '#ff6b6b');
 
           floatTexts.forEach(f => {
@@ -7974,7 +8625,7 @@ Game.init();
 });
 console.log('🎮 All game modes loaded successfully!');
 console.log('📦 Game Modes: Marble Solitaire, Happy Bird, Zombie Hunter, Color Switch, Chess, Connect Four, Memory Matching, Tower of Hanoi, Tic-Tac-Toe, Whack-a-Mole, Castle Defense, Endless Dungeon Escape, Carrom Board');
-console.log('🛒 Store has ' + Shop.skins.bird.length + ' bird skins, and ' + Shop.skins.enemy.length + ' enemy skins');
+console.log('🛒 Store has 13 distinct skin categories, one for each game mode!');
 console.log('🎯 20 unique board layouts available for Marble Solitaire!');
 </script>
 </body>
